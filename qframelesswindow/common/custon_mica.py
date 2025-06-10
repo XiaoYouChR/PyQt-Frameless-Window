@@ -39,9 +39,7 @@ class ExponentialBlur:
         height = workImage.height()
         width = workImage.width()
 
-        # 获取指向图像内存的可写视图
-        # 'bytearray' 比 'memoryview' 略慢，但对于这个算法而言差异可忽略
-        buffer = bytearray(workImage.bits())
+        buffer = workImage.bits()
 
         # 对每一行进行水平模糊
         for row in range(height):
@@ -51,122 +49,112 @@ class ExponentialBlur:
         for col in range(width):
             ExponentialBlur._blurColumn(buffer, width, height, workImage.bytesPerLine(), col, alpha)
 
-        # 从修改后的缓冲区创建一个新的 QImage
-        return QImage(buffer, width, height, workImage.bytesPerLine(), QImage.Format.Format_ARGB32_Premultiplied)
+        return workImage
 
     @staticmethod
     def _blurRow(buffer, width, bytesPerLine, row, alpha):
         # 计算当前行的起始字节偏移量
         rowOffset = row * bytesPerLine
+        aprec = ExponentialBlur._aprec
+        zprec = ExponentialBlur._zprec
 
         # 从该行的第一个像素初始化 zR, zG, zB, zA 累加器
         # << _zprec 是为了增加计算精度
         accumulators = [
-            buffer[rowOffset] << ExponentialBlur._zprec,
-            buffer[rowOffset + 1] << ExponentialBlur._zprec,
-            buffer[rowOffset + 2] << ExponentialBlur._zprec,
-            buffer[rowOffset + 3] << ExponentialBlur._zprec
+            buffer[rowOffset] << zprec,
+            buffer[rowOffset + 1] << zprec,
+            buffer[rowOffset + 2] << zprec,
+            buffer[rowOffset + 3] << zprec
         ]
 
         # 正向传递（从左到右）
         for i in range(width):
             offset = rowOffset + i * 4
-            accumulators = ExponentialBlur._applyInnerBlur(buffer, offset, accumulators, alpha)
+            ExponentialBlur._applyInnerBlur(buffer, offset, accumulators, alpha, aprec, zprec)
 
         # 反向传递（从右到左）
-        # 从倒数第二个像素开始
         offset = rowOffset + (width - 1) * 4
-        # 用行末像素重新初始化累加器
+        # 用行末像素重新初始化累加器以获得正确结果
         accumulators = [
-            buffer[offset] << ExponentialBlur._zprec,
-            buffer[offset + 1] << ExponentialBlur._zprec,
-            buffer[offset + 2] << ExponentialBlur._zprec,
-            buffer[offset + 3] << ExponentialBlur._zprec
+            buffer[offset] << zprec,
+            buffer[offset + 1] << zprec,
+            buffer[offset + 2] << zprec,
+            buffer[offset + 3] << zprec
         ]
         for i in range(width - 2, -1, -1):
             offset = rowOffset + i * 4
-            accumulators = ExponentialBlur._applyInnerBlur(buffer, offset, accumulators, alpha)
-
+            ExponentialBlur._applyInnerBlur(buffer, offset, accumulators, alpha, aprec, zprec)
 
     @staticmethod
     def _blurColumn(buffer, width, height, bytesPerLine, column, alpha):
         # 计算当前列的第一个像素的偏移量
         colOffset = column * 4
+        aprec = ExponentialBlur._aprec
+        zprec = ExponentialBlur._zprec
 
         # 从该列的第一个像素初始化累加器
         accumulators = [
-            buffer[colOffset] << ExponentialBlur._zprec,
-            buffer[colOffset + 1] << ExponentialBlur._zprec,
-            buffer[colOffset + 2] << ExponentialBlur._zprec,
-            buffer[colOffset + 3] << ExponentialBlur._zprec
+            buffer[colOffset] << zprec,
+            buffer[colOffset + 1] << zprec,
+            buffer[colOffset + 2] << zprec,
+            buffer[colOffset + 3] << zprec
         ]
 
         # 正向传递（从上到下）
         for i in range(height):
             offset = i * bytesPerLine + colOffset
-            accumulators = ExponentialBlur._applyInnerBlur(buffer, offset, accumulators, alpha)
+            ExponentialBlur._applyInnerBlur(buffer, offset, accumulators, alpha, aprec, zprec)
 
         # 反向传递（从下到上）
-        # 从列末像素重新初始化累加器
         offset = (height - 1) * bytesPerLine + colOffset
+        # 用列末像素重新初始化累加器
         accumulators = [
-            buffer[offset] << ExponentialBlur._zprec,
-            buffer[offset + 1] << ExponentialBlur._zprec,
-            buffer[offset + 2] << ExponentialBlur._zprec,
-            buffer[offset + 3] << ExponentialBlur._zprec
+            buffer[offset] << zprec,
+            buffer[offset + 1] << zprec,
+            buffer[offset + 2] << zprec,
+            buffer[offset + 3] << zprec
         ]
         for i in range(height - 2, -1, -1):
             offset = i * bytesPerLine + colOffset
-            accumulators = ExponentialBlur._applyInnerBlur(buffer, offset, accumulators, alpha)
+            ExponentialBlur._applyInnerBlur(buffer, offset, accumulators, alpha, aprec, zprec)
 
     @staticmethod
-    def _applyInnerBlur(buffer, offset, accumulators, alpha):
+    def _applyInnerBlur(buffer, offset, accumulators, alpha, aprec, zprec):
         """核心 IIR 滤波器。它会修改缓冲区并返回新的累加器值。"""
-        # 读取当前像素的 BGRA 值 (QImage 内存布局通常是 BGRA)
-        pixelValues = [buffer[offset], buffer[offset+1], buffer[offset+2], buffer[offset+3]]
-
         # IIR 滤波公式: z_new = z_old + alpha * (p - z_old)
         # 为了避免浮点运算，使用了定点算术 (<< _zprec, >> _aprec)
-        accumulators[0] += (alpha * ((pixelValues[0] << ExponentialBlur._zprec) - accumulators[0])) >> ExponentialBlur._aprec
-        accumulators[1] += (alpha * ((pixelValues[1] << ExponentialBlur._zprec) - accumulators[1])) >> ExponentialBlur._aprec
-        accumulators[2] += (alpha * ((pixelValues[2] << ExponentialBlur._zprec) - accumulators[2])) >> ExponentialBlur._aprec
-        accumulators[3] += (alpha * ((pixelValues[3] << ExponentialBlur._zprec) - accumulators[3])) >> ExponentialBlur._aprec
+        accumulators[0] += (alpha * ((buffer[offset] << zprec) - accumulators[0])) >> aprec
+        accumulators[1] += (alpha * ((buffer[offset+1] << zprec) - accumulators[1])) >> aprec
+        accumulators[2] += (alpha * ((buffer[offset+2] << zprec) - accumulators[2])) >> aprec
+        accumulators[3] += (alpha * ((buffer[offset+3] << zprec) - accumulators[3])) >> aprec
 
         # 将计算出的新像素值写回缓冲区
         # >> _zprec 用于将值恢复到 0-255 范围
-        buffer[offset]     = accumulators[0] >> ExponentialBlur._zprec
-        buffer[offset + 1] = accumulators[1] >> ExponentialBlur._zprec
-        buffer[offset + 2] = accumulators[2] >> ExponentialBlur._zprec
-        buffer[offset + 3] = accumulators[3] >> ExponentialBlur._zprec
-
-        # 返回更新后的累加器值
-        return accumulators
+        buffer[offset]     = accumulators[0] >> zprec
+        buffer[offset + 1] = accumulators[1] >> zprec
+        buffer[offset + 2] = accumulators[2] >> zprec
+        buffer[offset + 3] = accumulators[3] >> zprec
 
 
-class CustomMicaHelper(QObject):
+class CustomMicaInitHelper(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.wallpaper: QImage = WallpaperManager.getDesktopWallpaper()
-        self.onInitMicaBase(self.wallpaper)
+        self.lightBaseImage, self.darkBaseImage = self.CalculateMicaImage()
 
-    def onInitMicaBase(self, img: QImage):
+    def CalculateMicaImage(self):
         """
         根据输入图像生成明亮和黑暗主题的云母效果背景。
 
         :param img: QImage, 输入的原始图像。
         """
-        img = img.scaled(QSize(640, 360), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        img = self.wallpaper.scaled(QSize(640, 360), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
 
-        # 调用我们实现的指数模糊函数。
-        # 注意：C++ 版本返回 QPixmap 后调用了 .toImage()。
-        # 我们的 Python 版本直接返回 QImage，因此无需转换。
         blurImage = ExponentialBlur.doExponentialBlur(img, 500)
 
-        # 使用 .copy() 来创建独立的图像副本，而不是引用
         lightImage = blurImage.copy()
         darkImage = blurImage.copy()
-
 
         blurBits = blurImage.constBits()
         lightBits = lightImage.bits()
@@ -210,16 +198,10 @@ class CustomMicaHelper(QObject):
             darkBits[i+2] = darkColor.red()
             # Alpha 通道保持不变
 
-        self._lightBaseImage = lightImage.scaled(QSize(1920, 1080), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        self._darkBaseImage = darkImage.scaled(QSize(1920, 1080), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
-
-        # 调试
-        self._lightBaseImage.save("light.png", "PNG")
-        self._darkBaseImage.save("dark.png", "PNG")
-
+        return lightImage.scaled(QSize(1920, 1080), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation), darkImage.scaled(QSize(1920, 1080), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     time = perf_counter()
-    helper = CustomMicaHelper()
+    helper = CustomMicaInitHelper()
     print(f"执行耗时: {perf_counter() - time:.4f} 秒")
