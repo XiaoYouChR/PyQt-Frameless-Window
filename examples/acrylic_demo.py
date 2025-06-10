@@ -2,10 +2,10 @@
 import sys
 
 from PySide6.QtWidgets import QApplication
-from qframelesswindow import AcrylicWindow
+from qframelesswindow import AcrylicWindow, FramelessWindow
 
 
-class Window(AcrylicWindow):
+class Window(FramelessWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
@@ -16,7 +16,7 @@ class Window(AcrylicWindow):
         # self.windowEffect.setAcrylicEffect(self.winId(), "106EBE99")
 
         # you can also enable mica effect on Win11
-        # self.windowEffect.setMicaEffect(self.winId(), isDarkMode=False, isAlt=False)
+        self.windowEffect.setMicaEffect(self.winId(), isDarkMode=True, isAlt=False)
 
 
 if __name__ == '__main__':

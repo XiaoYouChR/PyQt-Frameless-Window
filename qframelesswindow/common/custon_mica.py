@@ -55,6 +55,8 @@ class ExponentialBlur:
     def _blurRow(buffer, width, bytesPerLine, row, alpha):
         # 计算当前行的起始字节偏移量
         rowOffset = row * bytesPerLine
+        
+        # 不用局部变量就慢死人了
         aprec = ExponentialBlur._aprec
         zprec = ExponentialBlur._zprec
 
@@ -136,7 +138,7 @@ class ExponentialBlur:
         buffer[offset + 3] = accumulators[3] >> zprec
 
 
-class CustomMicaInitHelper(QObject):
+class CustomMicaHelper(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -198,10 +200,11 @@ class CustomMicaInitHelper(QObject):
             darkBits[i+2] = darkColor.red()
             # Alpha 通道保持不变
 
-        return lightImage.scaled(QSize(1920, 1080), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation), darkImage.scaled(QSize(1920, 1080), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        return lightImage.scaled(QSize(1920, 1080), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation), \
+            darkImage.scaled(QSize(1920, 1080), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     time = perf_counter()
-    helper = CustomMicaInitHelper()
+    helper = CustomMicaHelper()
     print(f"执行耗时: {perf_counter() - time:.4f} 秒")

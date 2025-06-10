@@ -7,12 +7,14 @@ from ctypes.wintypes import DWORD, LONG, LPCVOID
 import win32api
 import win32con
 import win32gui
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPalette
+from PySide6.QtWidgets import QWidget
 
 from .c_structures import (ACCENT_POLICY, ACCENT_STATE, DWMNCRENDERINGPOLICY,
                            DWMWINDOWATTRIBUTE, MARGINS,
                            WINDOWCOMPOSITIONATTRIB,
                            WINDOWCOMPOSITIONATTRIBDATA, DWM_BLURBEHIND)
+from ..common.custon_mica import CustomMicaHelper
 from ..utils.win32_utils import isGreaterEqualWin10, isGreaterEqualWin11, isCompositionEnabled
 
 
@@ -20,7 +22,7 @@ class WindowsWindowEffect:
     """ Windows window effect """
 
     def __init__(self, window):
-        self.window = window
+        self.window: "QWidget" = window
 
         # Declare the function signature of the API
         self.user32 = WinDLL("user32")
@@ -135,29 +137,38 @@ class WindowsWindowEffect:
         isAlt: bool
             whether to enable mica alt effect
         """
-        if not isGreaterEqualWin11():
-            warnings.warn("The mica effect is only available on Win11")
-            return
-
-        hWnd = int(hWnd)
-        # fix issue #125
-        margins = MARGINS(16777215, 16777215, 0, 0)
-        self.DwmExtendFrameIntoClientArea(hWnd, byref(margins))
-
-        self.winCompAttrData.Attribute = WINDOWCOMPOSITIONATTRIB.WCA_ACCENT_POLICY.value
-        self.accentPolicy.AccentState = ACCENT_STATE.ACCENT_ENABLE_HOSTBACKDROP.value
-        self.SetWindowCompositionAttribute(hWnd, pointer(self.winCompAttrData))
-
+        # if isGreaterEqualWin11():
+        #     hWnd = int(hWnd)
+        #     # fix issue #125
+        #     margins = MARGINS(16777215, 16777215, 0, 0)
+        #     self.DwmExtendFrameIntoClientArea(hWnd, byref(margins))
+        # 
+        #     self.winCompAttrData.Attribute = WINDOWCOMPOSITIONATTRIB.WCA_ACCENT_POLICY.value
+        #     self.accentPolicy.AccentState = ACCENT_STATE.ACCENT_ENABLE_HOSTBACKDROP.value
+        #     self.SetWindowCompositionAttribute(hWnd, pointer(self.winCompAttrData))
+        # 
+        #     if isDarkMode:
+        #         self.winCompAttrData.Attribute = WINDOWCOMPOSITIONATTRIB.WCA_USEDARKMODECOLORS.value
+        #         self.SetWindowCompositionAttribute(hWnd, pointer(self.winCompAttrData))
+        # 
+        #     if sys.getwindowsversion().build < 22523:
+        #         self.DwmSetWindowAttribute(hWnd, 1029, byref(c_int(1)), 4)
+        #     else:
+        #         self.DwmSetWindowAttribute(hWnd, DWMWINDOWATTRIBUTE.DWMWA_SYSTEMBACKDROP_TYPE.value, byref(c_int(4 if isAlt else 2)), 4)
+        # 
+        #     self.DwmSetWindowAttribute(hWnd, DWMWINDOWATTRIBUTE.DWMWA_USE_IMMERSIVE_DARK_MODE.value, byref(c_int(1*isDarkMode)), 4)
+        # else:
+        if not hasattr(self, "customMicaHelper"):
+            self.customMicaHelper = CustomMicaHelper()
+            
+        palette = self.window.palette()
         if isDarkMode:
-            self.winCompAttrData.Attribute = WINDOWCOMPOSITIONATTRIB.WCA_USEDARKMODECOLORS.value
-            self.SetWindowCompositionAttribute(hWnd, pointer(self.winCompAttrData))
-
-        if sys.getwindowsversion().build < 22523:
-            self.DwmSetWindowAttribute(hWnd, 1029, byref(c_int(1)), 4)
+            palette.setBrush(QPalette.ColorRole.Window, self.customMicaHelper.darkBaseImage)
         else:
-            self.DwmSetWindowAttribute(hWnd, DWMWINDOWATTRIBUTE.DWMWA_SYSTEMBACKDROP_TYPE.value, byref(c_int(4 if isAlt else 2)), 4)
-
-        self.DwmSetWindowAttribute(hWnd, DWMWINDOWATTRIBUTE.DWMWA_USE_IMMERSIVE_DARK_MODE.value, byref(c_int(1*isDarkMode)), 4)
+            palette.setBrush(QPalette.ColorRole.Window, self.customMicaHelper.lightBaseImage)
+        self.window.setPalette(palette)
+        print(self.window.autoFillBackground())
+        self.window.setAutoFillBackground(True)
 
     def setAeroEffect(self, hWnd):
         """ Add the aero effect to the window
