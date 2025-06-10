@@ -163,9 +163,9 @@ class WindowsWindowEffect:
             
         palette = self.window.palette()
         if isDarkMode:
-            palette.setBrush(QPalette.ColorRole.Window, self.customMicaHelper.darkBaseImage)
+            palette.setBrush(QPalette.ColorRole.Window, self.customMicaHelper.darkMicaImage)
         else:
-            palette.setBrush(QPalette.ColorRole.Window, self.customMicaHelper.lightBaseImage)
+            palette.setBrush(QPalette.ColorRole.Window, self.customMicaHelper.lightMicaImage)
         self.window.setPalette(palette)
         print(self.window.autoFillBackground())
         self.window.setAutoFillBackground(True)
