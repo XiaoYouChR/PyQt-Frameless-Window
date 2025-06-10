@@ -3,7 +3,7 @@ import math
 from time import perf_counter
 
 from PySide6.QtCore import QObject, QSize, Qt
-from PySide6.QtGui import QImage, QColor
+from PySide6.QtGui import QImage, QColor, QPainter
 from PySide6.QtWidgets import QApplication
 
 from qframelesswindow.common.wallpaper_manager import WallpaperManager
@@ -139,72 +139,105 @@ class ExponentialBlur:
 
 
 class CustomMicaHelper(QObject):
-
+    """
+    使用优化的算法生成 Windows 11 Mica 风格的背景图像。
+    使用驼峰命名法。
+    """
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.wallpaper: QImage = WallpaperManager.getDesktopWallpaper()
-        self.lightBaseImage, self.darkBaseImage = self.CalculateMicaImage()
+        self.wallpaper = WallpaperManager.getDesktopWallpaper()
+        # 在初始化时直接生成两种模式的图像
+        self.lightBaseImage, self.darkBaseImage = self.calculateMicaImages()
 
-    def CalculateMicaImage(self):
+    def calculateMicaImages(self):
         """
-        根据输入图像生成明亮和黑暗主题的云母效果背景。
+        根据桌面壁纸生成明亮和黑暗主题的 Mica 效果背景。
+        此方法通过模糊和颜色叠加来创建更自然、美观的效果。
 
-        :param img: QImage, 输入的原始图像。
+        :return: (QImage, QImage) 元组，分别为明亮主题和黑暗主题的图像。
         """
-        img = self.wallpaper.scaled(QSize(640, 360), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        # 1. 为了性能，先将图像缩小再进行模糊处理。
+        #    使用稍大的中间尺寸（如 960x540）可以在最终放大时获得更好的质量。
+        intermediateSize = QSize(720, 480)
+        sourceImage = self.wallpaper.scaled(
+            intermediateSize,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
 
-        blurImage = ExponentialBlur.doExponentialBlur(img, 500)
+        # 2. 对缩小后的图像应用强烈的指数模糊。
+        #    半径 100-120 在这个尺寸下能产生很好的朦胧效果。
+        blurredImage = ExponentialBlur.doExponentialBlur(sourceImage, 150)
+        
+        blurredImage.save("blurred.png")
+        
+        # 3. 创建明亮主题的图像
+        lightImage = self._createTintedImage(
+            blurredImage, QColor(243, 243, 243, 200) # 浅色叠加层，约82%不透明度
+        )
 
-        lightImage = blurImage.copy()
-        darkImage = blurImage.copy()
+        # 4. 创建黑暗主题的图像
+        darkImage = self._createTintedImage(
+            blurredImage, QColor(32, 32, 32, 200) # 深色叠加层，约86%不透明度
+        )
 
-        blurBits = blurImage.constBits()
-        lightBits = lightImage.bits()
-        darkBits = darkImage.bits()
+        # 5. 将处理后的图像放大到最终的目标尺寸
+        targetSize = QSize(1920, 1080)
+        finalLightImage = lightImage.scaled(
+            targetSize,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        finalDarkImage = darkImage.scaled(
+            targetSize,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
 
-        bytesPerPixel = 4 # ARGB32_Premultiplied 格式每个像素占4字节
+        return finalLightImage, finalDarkImage
 
-        # 使用单个循环遍历整个图像缓冲区
-        for i in range(0, blurImage.sizeInBytes(), bytesPerPixel):
-            # 从缓冲区读取 BGRA 值
-            # 注意: QImage 在内存中通常是 BGRA 顺序
-            b, g, r = blurBits[i], blurBits[i+1], blurBits[i+2]
+    def _createTintedImage(self, sourceImage: QImage, tintColor: QColor) -> QImage:
+        """
+        在源图像上叠加一个半透明的纯色层。
 
-            # QColor.fromRgb 需要 (R, G, B) 顺序
-            # .getHsv() 返回 (h, s, v, a) 元组。h 为 -1 表示灰度色
-            h, s, v, _ = QColor(r, g, b).getHsv()
+        :param sourceImage: 要处理的基底图像。
+        :param tintColor: 带有 alpha 通道的叠加颜色。
+        :return: 返回一个新的、已叠加颜色的 QImage。
+        """
+        # 创建一个副本进行绘制，以免修改原始的 blurredImage
+        tintedImage = sourceImage.copy()
+        painter = QPainter(tintedImage)
 
-            # --- 计算明亮主题颜色 ---
-            if s // 20 > 11:
-                newLightSaturation = (s // 20 + 11) // 2
-                lightColor = QColor.fromHsv(h, newLightSaturation, 250)
-            else:
-                lightColor = QColor.fromHsv(h, 11, 250)
+        # 在整个图像区域填充指定的半透明颜色
+        painter.fillRect(tintedImage.rect(), tintColor)
 
-            # --- 计算黑暗主题颜色 ---
-            if v / 1.1 > 40:
-                newDarkValue = int((v / 1.1 + 40) / 2)
-                darkColor = QColor.fromHsv(h, s // 2, newDarkValue)
-            else:
-                darkColor = QColor.fromHsv(h, s // 2, 40)
+        painter.end()
+        return tintedImage
 
-            # 将计算出的颜色值直接写回 lightImage 的内存缓冲区
-            lightBits[i] = lightColor.blue()
-            lightBits[i+1] = lightColor.green()
-            lightBits[i+2] = lightColor.red()
-            # Alpha 通道保持不变
-
-            # 将计算出的颜色值直接写回 darkImage 的内存缓冲区
-            darkBits[i] = darkColor.blue()
-            darkBits[i+1] = darkColor.green()
-            darkBits[i+2] = darkColor.red()
-            # Alpha 通道保持不变
-
-        return lightImage.scaled(QSize(1920, 1080), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation), \
-            darkImage.scaled(QSize(1920, 1080), Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    time = perf_counter()
+
+    print("正在生成 Mica 效果图像...")
+    startTime = perf_counter()
+
+    # 创建 Helper 实例，它会自动生成图像
     helper = CustomMicaHelper()
-    print(f"执行耗时: {perf_counter() - time:.4f} 秒")
+
+    # 获取生成的图像
+    lightImage = helper.lightBaseImage
+    darkImage = helper.darkBaseImage
+
+    executionTime = perf_counter() - startTime
+    print(f"执行耗时: {executionTime:.4f} 秒")
+
+    # 保存结果以便查看
+    try:
+        lightImage.save("mica_light_optimized.png")
+        darkImage.save("mica_dark_optimized.png")
+        print("优化后的图像已保存为 'mica_light_optimized.png' 和 'mica_dark_optimized.png'")
+    except Exception as e:
+        print(f"保存图像失败: {e}")
+
+    # 为了在没有GUI循环的情况下使程序退出
+    # sys.exit()
